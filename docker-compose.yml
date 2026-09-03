@@ -1,4 +1,4 @@
-version: "3.9"
+
 
 # ShopSphere: two independently deployable services sharing one JWT secret so
 # core-service can validate tokens issued by auth-service without calling back
