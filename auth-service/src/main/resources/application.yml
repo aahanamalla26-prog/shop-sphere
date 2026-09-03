@@ -1,0 +1,41 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: auth-service
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:shopsphere_auth}?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:shopsphere}
+    password: ${DB_PASSWORD:shopsphere}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
+        format_sql: true
+
+security:
+  jwt:
+    # In production, this MUST be supplied via env var / secret manager, never committed.
+    secret: ${JWT_SECRET:change-this-super-secret-key-min-256-bits-for-hs256-signing}
+    access-token-ttl-seconds: ${JWT_ACCESS_TTL:900}      # 15 minutes
+    refresh-token-ttl-seconds: ${JWT_REFRESH_TTL:604800} # 7 days
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    com.shopsphere.auth: INFO
