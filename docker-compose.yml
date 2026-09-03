@@ -1,0 +1,91 @@
+version: "3.9"
+
+# ShopSphere: two independently deployable services sharing one JWT secret so
+# core-service can validate tokens issued by auth-service without calling back
+# into it on every request. Each service owns its own MySQL database
+# (database-per-service), reinforcing the boundary between them.
+
+services:
+
+  mysql-auth:
+    image: mysql:8.0
+    container_name: shopsphere-mysql-auth
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: shopsphere_auth
+      MYSQL_USER: shopsphere
+      MYSQL_PASSWORD: shopsphere
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-auth-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-core:
+    image: mysql:8.0
+    container_name: shopsphere-mysql-core
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: shopsphere_core
+      MYSQL_USER: shopsphere
+      MYSQL_PASSWORD: shopsphere
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql-core-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  auth-service:
+    build:
+      context: ./auth-service
+    container_name: shopsphere-auth-service
+    restart: unless-stopped
+    depends_on:
+      mysql-auth:
+        condition: service_healthy
+    environment:
+      DB_HOST: mysql-auth
+      DB_PORT: 3306
+      DB_NAME: shopsphere_auth
+      DB_USERNAME: shopsphere
+      DB_PASSWORD: shopsphere
+      JWT_SECRET: ${JWT_SECRET:-change-this-super-secret-key-min-256-bits-for-hs256-signing}
+      JWT_ACCESS_TTL: 900
+      JWT_REFRESH_TTL: 604800
+    ports:
+      - "8081:8081"
+
+  core-service:
+    build:
+      context: ./core-service
+    container_name: shopsphere-core-service
+    restart: unless-stopped
+    depends_on:
+      mysql-core:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+    environment:
+      DB_HOST: mysql-core
+      DB_PORT: 3306
+      DB_NAME: shopsphere_core
+      DB_USERNAME: shopsphere
+      DB_PASSWORD: shopsphere
+      # Must match auth-service's JWT_SECRET above.
+      JWT_SECRET: ${JWT_SECRET:-change-this-super-secret-key-min-256-bits-for-hs256-signing}
+    ports:
+      - "8082:8082"
+
+volumes:
+  mysql-auth-data:
+  mysql-core-data:
