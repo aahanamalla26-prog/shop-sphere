@@ -109,7 +109,7 @@ mvn spring-boot:run
 You'll need a local MySQL instance and to override `DB_HOST`/`DB_PORT`/`DB_USERNAME`/`DB_PASSWORD`
 env vars (see `application.yml` for defaults).
 
-## API overview (29 endpoints)
+## API overview (32 endpoints)
 
 All protected endpoints expect `Authorization: Bearer <accessToken>`, obtained from
 `auth-service`'s `/api/auth/login` or `/api/auth/register`.
@@ -176,9 +176,15 @@ All protected endpoints expect `Authorization: Bearer <accessToken>`, obtained f
 ## Design notes
 
 - **Transactional integrity**: checkout (`POST /api/orders`) reserves stock for every cart line
-  and builds the order in a single `@Transactional` method — if any item is out of stock, the
-  entire operation rolls back so the system never produces a partially-placed order or oversells
-  inventory.
+and builds the order in a single `@Transactional` method -- if any item is out of stock, the
+entire operation rolls back so the system never produces a partially-placed order.
+- **Concurrency-safe stock**: stock is reserved with one atomic SQL statement
+(`UPDATE products SET stock = stock - :qty WHERE id = :id AND stock >= :qty`), so the check and
+the decrement cannot be separated by another request. Cart lines are reserved in `productId`
+order so concurrent checkouts lock rows consistently and cannot deadlock. Verified by
+`CheckoutConcurrencyTest` (20 threads competing for 5 units -> exactly 5 orders).
+- **Idempotent cancel**: cancelling takes a row lock on the order (`SELECT ... FOR UPDATE`) and
+rejects already-cancelled orders, so stock is restored exactly once even under concurrent cancels.
 - **Global exception handling**: both services expose a `@RestControllerAdvice` that maps domain
   exceptions (`ResourceNotFoundException`, `InsufficientStockException`, validation errors, etc.)
   to a single consistent JSON error shape (`timestamp`, `status`, `error`, `message`, optional

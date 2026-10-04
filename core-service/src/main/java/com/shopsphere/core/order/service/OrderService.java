@@ -20,6 +20,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Comparator;
+import java.util.List;
 
 @Service
 public class OrderService {
@@ -52,7 +54,13 @@ public class OrderService {
 
         BigDecimal total = BigDecimal.ZERO;
 
-        for (CartItem cartItem : cart.getItems()) {
+        // Reserve stock in a consistent (productId) order so concurrent checkouts that share
+        // products always lock rows in the same order and cannot deadlock each other.
+        List<CartItem> orderedItems = cart.getItems().stream()
+                .sorted(Comparator.comparing(CartItem::getProductId))
+                .toList();
+
+        for (CartItem cartItem : orderedItems) {
             Product product = productService.getOrThrow(cartItem.getProductId());
             productService.reserveStock(product, cartItem.getQuantity()); // throws InsufficientStockException -> rolls back txn
 
@@ -101,17 +109,22 @@ public class OrderService {
 
     @Transactional
     public OrderResponse cancel(UserPrincipal caller, Long orderId) {
-        Order order = getOrThrow(orderId);
+        // Lock the order row first: a second concurrent cancel waits here, then sees CANCELLED.
+        Order order = orderRepository.findByIdForUpdate(orderId)
+                .orElseThrow(() -> ResourceNotFoundException.of("Order", orderId));
         assertOwnerOrAdmin(caller, order);
+
+        if (order.getStatus() == OrderStatus.CANCELLED) {
+            throw new ForbiddenOperationException("Order is already cancelled");
+        }
 
         if (order.getStatus() == OrderStatus.SHIPPED || order.getStatus() == OrderStatus.DELIVERED) {
             throw new ForbiddenOperationException("Order has already shipped and can no longer be cancelled");
         }
 
-        // Restock cancelled items.
+        // Restock cancelled items (atomic increments).
         for (OrderItem item : order.getItems()) {
-            Product product = productService.getOrThrow(item.getProductId());
-            product.setStockQuantity(product.getStockQuantity() + item.getQuantity());
+            productService.releaseStock(item.getProductId(), item.getQuantity());
         }
 
         order.setStatus(OrderStatus.CANCELLED);

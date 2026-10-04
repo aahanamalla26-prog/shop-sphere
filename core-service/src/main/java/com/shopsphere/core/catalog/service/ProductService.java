@@ -80,13 +80,24 @@ public class ProductService {
         product.setActive(false); // soft delete: preserves history for past orders/reviews
     }
 
-    /** Used by the order flow to atomically check-and-decrement stock inside the order transaction. */
+    /**
+     * Used by the order flow. Reserves stock with a single atomic conditional UPDATE, so two
+     * concurrent checkouts for the last unit cannot both succeed. Throws if stock is insufficient,
+     * which rolls back the surrounding order transaction.
+     */
     @Transactional
     public void reserveStock(Product product, int quantity) {
-        if (!product.hasStock(quantity)) {
-            throw new InsufficientStockException(product.getName(), product.getStockQuantity(), quantity);
+        int updated = productRepository.decrementStockIfAvailable(product.getId(), quantity);
+        if (updated == 0) {
+            int available = productRepository.findStockQuantityById(product.getId()).orElse(0);
+            throw new InsufficientStockException(product.getName(), available, quantity);
         }
-        product.setStockQuantity(product.getStockQuantity() - quantity);
+    }
+
+    /** Returns stock when an order is cancelled (atomic increment, safe under concurrency). */
+    @Transactional
+    public void releaseStock(Long productId, int quantity) {
+        productRepository.incrementStock(productId, quantity);
     }
 
     public Product getOrThrow(Long id) {

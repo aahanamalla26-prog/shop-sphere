@@ -29,7 +29,7 @@ jobs:
       - name: Build Core Service
         run: |
           cd core-service
-          mvn clean test-compile
+          mvn -B clean test
 
       - name: Verify Docker Compose Build
         run: docker compose build
